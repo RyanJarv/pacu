@@ -346,14 +346,15 @@ class Main:
 
         # TODO: error and user handling
         if not aws_key.permissions_confirmed:
-            path = 'sessions/{}/downloads/confirmed_permissions/role-{}.json'.format(session.name, aws_key.role_name)
+            path = 'sessions/{}/downloads/confirmed_permissions/role-{}.json'.format(session.name, aws_key.key_alias.removeprefix("role/"))
             if os.path.exists(path):
                 with open(path) as f:
                     content = json.load(f)
-                    print(content)
                     if content["PermissionsConfirmed"]:
                         self.print("Using previously found permissions in {}", path)
-                        aws_key.allow_permissions = content["Permissions"]["Allow"]
+                        aws_key.policies = content["Policies"]
+                        aws_key.role_name = content["RoleName"]
+                        aws_key.allow_permissions = content["Permissions"]
                         aws_key.deny_permissions = content["Permissions"]["Deny"]
 
         if aws_key is not None:
