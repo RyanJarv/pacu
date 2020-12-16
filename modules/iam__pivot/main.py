@@ -10,6 +10,7 @@ import botocore.session
 import botocore.client
 from principalmapper.common import Node, Graph, Edge
 from principalmapper.graphing import graph_actions
+from principalmapper.graphing.edge_identification import checker_map
 from principalmapper.querying.query_utils import get_search_list
 
 # When writing a module, feel free to remove any comments, placeholders, or
@@ -88,11 +89,14 @@ def main(args, pacu_main):
 
     sess = sess_from_h(user)
 
+    # TODO: Unhardcode session name
     root = 'sessions/demo/pmmapper'
+
+    # TODO: Move graph creation to another module
     try:
         graph_obj = graph_actions.get_graph_from_disk(root)
     except ValueError:
-        graph_obj = graph_actions.create_new_graph(sess._session, ['iam', 'sts'])
+        graph_obj = graph_actions.create_new_graph(sess._session, checker_map.keys())
         graph_obj.store_graph_as_json(root)
 
     if user["UserName"]:
