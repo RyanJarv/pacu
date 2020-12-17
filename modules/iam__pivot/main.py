@@ -34,9 +34,10 @@ def main(args, pacu_main):
 
     user = key_info()
 
+
+
     if pacu_main.fetch_data(['IAM'], 'iam_enum_permissions', '') is False:
-        print('Pre-req module not run successfully. Exiting...')
-        return
+        print('Pre-req module not run successfully. Continuing anyways')
 
     sess = sess_from_h(user)
 
