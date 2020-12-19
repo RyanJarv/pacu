@@ -12,6 +12,9 @@ import sys
 import time
 import traceback
 import argparse
+from enum import Enum
+
+import placebo
 
 try:
     import requests
@@ -32,19 +35,25 @@ except ModuleNotFoundError as error:
     print('Pacu was not able to start because a required Python package was not found.\nRun `sh install.sh` to check and install Pacu\'s Python requirements.')
     sys.exit(1)
 
+class ApiRecorderMode(Enum):
+    stopped = 1
+    recording = 2
+    playback = 3
 
 class Main:
     COMMANDS = [
         'aws', 'data', 'exec', 'exit', 'help', 'import_keys', 'list', 'load_commands_file',
         'ls', 'quit', 'regions', 'run', 'search', 'services', 'set_keys', 'set_regions',
         'swap_keys', 'update_regions', 'whoami', 'swap_session', 'sessions',
-        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console'
+        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console', 'local'
     ]
 
     def __init__(self):
         self.database = None
         self.running_module_names = []
         self.CATEGORIES = self.load_categories()
+        self.aws_session = None
+        self.api_recorder_mode = ApiRecorderMode.recording
 
     # Utility methods
 
@@ -423,7 +432,7 @@ class Main:
         import the PacuSession model. """
         return PacuSession.get_active_session(self.database)
 
-    def get_aws_key_by_alias(self, alias):
+    def get_aws_key_by_alias(self, alias) -> AWSKey:
         """ Return an AWSKey with the supplied alias that is assigned to the
         currently active PacuSession from the database, or None if no AWSKey
         with the supplied alias exists. If more than one key with the alias
@@ -450,6 +459,9 @@ class Main:
             self.print('  Error: Unbalanced quotes in command')
             return
 
+        self.exec_command(command)
+
+    def exec_command(self, command):
         if not command or command[0] == '':
             return
         elif command[0] == 'data':
@@ -460,6 +472,13 @@ class Main:
             self.check_sessions()
         elif command[0] == 'delete_session':
             self.delete_session()
+        elif command[0] == 'local':
+            self.api_recorder_mode = ApiRecorderMode.playback
+            command[0] = "run"
+            try:
+                self.exec_command(command)
+            finally:
+                self.api_recorder_mode = ApiRecorderMode.recording
         elif command[0] == 'export_keys':
             self.export_keys(command)
         elif command[0] == 'help':
@@ -653,6 +672,10 @@ class Main:
                                                   command to reset the region set to the default of all
                                                   supported regions
             run/exec <module name>              Execute a module
+            local <module name>                 Similar to run/exec except we attempt to mock Get/Describe/List
+                                                  API call's against data already gathered from previous commands.
+                                                  This is useful when the module needs info that the current user
+                                                  doesn't have access to but was already gathered from other keys.
             set_keys                            Add a set of AWS keys to the session and set them as the
                                                   default
             swap_keys                           Change the currently active AWS key to another key that has
@@ -845,6 +868,8 @@ aws_secret_access_key = {}
     def exec_module(self, command):
         session = self.get_active_session()
 
+        session.aws_session
+
         # Run key checks so that if no keys have been set, Pacu doesn't default to
         # the AWSCLI default profile:
         if not session.access_key_id:
@@ -945,6 +970,8 @@ aws_secret_access_key = {}
             print('\n    set_regions <region> [<region>...]\n        Set the default regions for this session. These space-separated regions will be used for modules where\n          regions are required, but not supplied by the user. The default set of regions is every supported\n          region for the service. Supply "all" to this command to reset the region set to the default of all\n          supported regions\n')
         elif command_name == 'run' or command_name == 'exec':
             print('\n    run/exec <module name>\n        Execute a module\n')
+        elif command_name == 'local':
+            print('\n    local <module name>\n        Similar to run/exec but attempts to reuse previously gathered. This is useful if you are using iam_pivot to assume \n            other roles and the module you want to run requires access the current user doesn\'t have.')
         elif command_name == 'set_keys':
             print('\n    set_keys\n        Add a set of AWS keys to the session and set them as the default\n')
         elif command_name == 'swap_keys':
@@ -1322,6 +1349,36 @@ aws_secret_access_key = {}
                 self.print('  User agent for this session set to:')
                 self.print('    {}'.format(new_ua))
 
+
+    def _setup_api_recorder(self, sess: boto3.session.Session):
+        session = self.get_active_session()
+
+        path = './sessions/{}/api_recorder'.format(session.name)
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+        api_recorder = placebo.attach(sess, data_path=path)
+
+        if self.api_recorder_mode == ApiRecorderMode.recording:
+            api_recorder.record('*', 'Get*,List*,Describe*')
+        elif self.api_recorder_mode == ApiRecorderMode.playback:
+            api_recorder.playback()
+        elif self.api_recorder_mode == ApiRecorderMode.stopped:
+            api_recorder.stop()
+
+        return api_recorder
+
+    def get_boto3_session(self, recording=ApiRecorderMode.recording):
+        session = self.get_active_session()
+        if not self.aws_session:
+            sess = boto3.session.Session(
+                aws_access_key_id=session.access_key_id,
+                aws_secret_access_key=session.secret_access_key,
+                aws_session_token=session.aws_session,
+            )
+        self._setup_api_recorder(sess)
+        return sess
+
     def get_boto3_client(self, service, region=None, user_agent=None, parameter_validation=True):
         session = self.get_active_session()
 
@@ -1345,7 +1402,7 @@ aws_secret_access_key = {}
             parameter_validation=parameter_validation
         )
 
-        return boto3.client(
+        client = self.get_boto3_session().client(
             service,
             region_name=region,  # Whether region has a value or is None, it will work here
             aws_access_key_id=session.access_key_id,
@@ -1353,6 +1410,9 @@ aws_secret_access_key = {}
             aws_session_token=session.session_token,
             config=boto_config
         )
+
+        return client
+
 
     def get_boto3_resource(self, service, region=None, user_agent=None, parameter_validation=True):
         # All the comments from get_boto3_client apply here too
@@ -1373,7 +1433,7 @@ aws_secret_access_key = {}
             parameter_validation=parameter_validation
         )
 
-        return boto3.resource(
+        return self.get_boto3_session().resource(
             service,
             region_name=region,
             aws_access_key_id=session.access_key_id,

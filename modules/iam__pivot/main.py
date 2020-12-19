@@ -3,6 +3,7 @@ import argparse
 import collections
 
 import boto3
+from principalmapper.common import Graph
 from principalmapper.graphing import graph_actions
 from principalmapper.querying.query_utils import get_search_list
 
@@ -15,6 +16,7 @@ module_info = {
                    'roles that can be assumed and allows you to pivot to them for the current user.',
     'services': ['IAM'],
     'prerequisite_modules': ['iam_enum_permissions'],
+    'arguments_to_autocomplete': ['--rebuild-db'],
 }
 
 # Every module must include an ArgumentParser named "parser", even if it
@@ -39,17 +41,12 @@ def main(args, pacu_main):
     if pacu_main.fetch_data(['IAM'], 'iam_enum_permissions', '') is False:
         print('Pre-req module not run successfully. Continuing anyways')
 
-    sess = sess_from_h(user)
 
     root = 'sessions/{}/pmmapper'.format(session.name)
+    sess = pacu_main.get_boto3_session()
 
-    if args.rebuild_db:
-        rebuild_db(sess, root)
-    else:
-        try:
-            graph = graph_actions.get_graph_from_disk(root)
-        except ValueError:
-            rebuild_db(sess, root)
+
+    graph = get_graph(sess, root, args.rebuild_db)
 
     if user["UserName"]:
         source_name = 'user/{}'.format(user["UserName"])
@@ -92,10 +89,21 @@ def sess_from_h(user) -> boto3.session.Session:
     return boto3.session.Session(aws_access_key_id=user['AccessKeyId'], aws_secret_access_key=user['SecretAccessKey'],
                                  aws_session_token=user['SessionToken'])
 
+def get_graph(sess, root, rebuild: bool = False):
+    if rebuild:
+        graph = rebuild_db(sess, root)
+    else:
+        try:
+            graph = graph_actions.get_graph_from_disk(root)
+        except ValueError:
+            rebuild_db(sess, root)
+            graph = graph_actions.get_graph_from_disk(root)
+    return graph
 
-def rebuild_db(sess, root):
+def rebuild_db(sess, root) -> Graph:
     graph = graph_actions.create_new_graph(sess._session, ['sts'])
     graph.store_graph_as_json(root)
+    return graph
 
 
 def ask_for_target(data, input, print):
