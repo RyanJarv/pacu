@@ -1366,25 +1366,24 @@ aws_secret_access_key = {}
         recording = 2
         playback = 3
 
-    def get_boto3_session(self, recording=ApiRecorderMode.recording):
-        if self.aws_session:
-            return self.aws_session
-        else:
-            session = self.get_active_session()
-            self.aws_session = boto3.session.Session(
-                aws_access_key_id=session.access_key_id,
-                aws_secret_access_key=session.secret_access_key,
-                aws_session_token=session.session_token,
-            )
+    def get_boto3_session(self):
+        return self.aws_session
 
-            path = './sessions/{}/api_recorder'.format(session.name)
-            if not os.path.exists(path):
-                os.mkdir(path)
+    def api_recorder_init(self):
+        session = self.get_active_session()
+        self.aws_session = boto3.session.Session(
+            aws_access_key_id=session.access_key_id,
+            aws_secret_access_key=session.secret_access_key,
+            aws_session_token=session.session_token,
+        )
 
-            self.api_recorder = placebo.attach(self.aws_session, data_path=path, debug=True)
-            self.api_recorder.record('.*', '(Get|List|Describe).*')
+        path = './sessions/{}/api_recorder'.format(session.name)
+        if not os.path.exists(path):
+            os.mkdir(path)
 
-            return self.aws_session
+        self.api_recorder = placebo.attach(self.aws_session, data_path=path, debug=True)
+        self.api_recorder.record('.*', '(Get|List|Describe).*')
+
 
     def get_boto3_client(self, service, region=None, user_agent=None, parameter_validation=True):
         session = self.get_active_session()
@@ -1583,6 +1582,8 @@ aws_secret_access_key = {}
             session_index = session_names.index(session)
             sessions[session_index].is_active = True
 
+        self.api_recorder_init()
+
         if module_name is not None:
             module = ['exec', module_name]
 
@@ -1666,6 +1667,8 @@ aws_secret_access_key = {}
                     self.database = get_database_connection(settings.DATABASE_CONNECTION_PATH)
 
                     self.check_sessions()
+
+                    self.api_recorder_init()
 
                     self.initialize_tab_completion()
                     self.display_pacu_help()
