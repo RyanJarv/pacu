@@ -6,6 +6,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import subprocess
 import datetime
 import sys
@@ -35,25 +36,20 @@ except ModuleNotFoundError as error:
     print('Pacu was not able to start because a required Python package was not found.\nRun `sh install.sh` to check and install Pacu\'s Python requirements.')
     sys.exit(1)
 
-class ApiRecorderMode(Enum):
-    stopped = 1
-    recording = 2
-    playback = 3
-
 class Main:
     COMMANDS = [
         'aws', 'data', 'exec', 'exit', 'help', 'import_keys', 'list', 'load_commands_file',
         'ls', 'quit', 'regions', 'run', 'search', 'services', 'set_keys', 'set_regions',
         'swap_keys', 'update_regions', 'whoami', 'swap_session', 'sessions',
-        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console', 'local'
+        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console', 'record'
     ]
 
     def __init__(self):
         self.database = None
         self.running_module_names = []
         self.CATEGORIES = self.load_categories()
-        self.aws_session = None
-        self.api_recorder_mode = ApiRecorderMode.recording
+        self.aws_session: boto3.session.Session = None
+        self.api_recorder: placebo.pill.Pill = None
 
     # Utility methods
 
@@ -472,13 +468,8 @@ class Main:
             self.check_sessions()
         elif command[0] == 'delete_session':
             self.delete_session()
-        elif command[0] == 'local':
-            self.api_recorder_mode = ApiRecorderMode.playback
-            command[0] = "run"
-            try:
-                self.exec_command(command)
-            finally:
-                self.api_recorder_mode = ApiRecorderMode.recording
+        elif command[0] == 'api_recording':
+            self.api_recording(command[1])
         elif command[0] == 'export_keys':
             self.export_keys(command)
         elif command[0] == 'help':
@@ -672,10 +663,14 @@ class Main:
                                                   command to reset the region set to the default of all
                                                   supported regions
             run/exec <module name>              Execute a module
-            local <module name>                 Similar to run/exec except we attempt to mock Get/Describe/List
-                                                  API call's against data already gathered from previous commands.
-                                                  This is useful when the module needs info that the current user
-                                                  doesn't have access to but was already gathered from other keys.
+            api_recording [on|off|playback]                 
+                                                Configures the API call/response recorder. By default this is on 
+                                                  and records are stored under sessions/<session name>/api_recorder.
+                                                  This act's as record of all resources discovered so far by
+                                                  Describe/Get/List. Setting this to playback mode will mock out 
+                                                  responses from this directory. This makes it easy to data gathered
+                                                  from various roles, even if your current user wouldn't normally
+                                                  have access to call a give API.
             set_keys                            Add a set of AWS keys to the session and set them as the
                                                   default
             swap_keys                           Change the currently active AWS key to another key that has
@@ -868,8 +863,6 @@ aws_secret_access_key = {}
     def exec_module(self, command):
         session = self.get_active_session()
 
-        session.aws_session
-
         # Run key checks so that if no keys have been set, Pacu doesn't default to
         # the AWSCLI default profile:
         if not session.access_key_id:
@@ -970,8 +963,8 @@ aws_secret_access_key = {}
             print('\n    set_regions <region> [<region>...]\n        Set the default regions for this session. These space-separated regions will be used for modules where\n          regions are required, but not supplied by the user. The default set of regions is every supported\n          region for the service. Supply "all" to this command to reset the region set to the default of all\n          supported regions\n')
         elif command_name == 'run' or command_name == 'exec':
             print('\n    run/exec <module name>\n        Execute a module\n')
-        elif command_name == 'local':
-            print('\n    local <module name>\n        Similar to run/exec but attempts to reuse previously gathered. This is useful if you are using iam_pivot to assume \n            other roles and the module you want to run requires access the current user doesn\'t have.')
+        elif command_name == 'api_recording':
+            print('\n    Configures the API call/response recorder. By default this is on and records are stored under sessions/<session name>/api_recorder. This act\'s as record of all resources discovered so far by Describe/Get/List. Setting this to playback mode will mock out \nresponses from this directory. This makes it easy to data gathered from various roles, even if your current\n user wouldn\'t normally have access to call a give API')
         elif command_name == 'set_keys':
             print('\n    set_keys\n        Add a set of AWS keys to the session and set them as the default\n')
         elif command_name == 'swap_keys':
@@ -1315,6 +1308,25 @@ aws_secret_access_key = {}
 
         return
 
+    def api_recording(self, arg):
+        if arg == "on":
+            self.api_recorder.record('.*', '(Get|List|Describe).*')
+        elif arg == "off":
+            self.api_recorder.stop()
+        elif arg == "playback":
+            self.api_recorder.playback()
+        elif arg == "clear":
+            path = os.path.abspath(self.api_recorder.data_path)
+            resp = self.input("Are you sure you want to delete {}? (y/n) ".format(path))
+            if resp.lower() == 'y':
+                self.print("Deleting {}....".format(path))
+                shutil.rmtree(path)
+            elif resp.lower() == 'n':
+                self.print("Ok, nothing was deleted.".format(path))
+            else:
+                self.print("Must enter either y or n, nothing was deleted.")
+
+
     def get_data_from_traceback(self, tb):
         session = None
         global_data_in_all_frames = list()
@@ -1349,35 +1361,30 @@ aws_secret_access_key = {}
                 self.print('  User agent for this session set to:')
                 self.print('    {}'.format(new_ua))
 
-
-    def _setup_api_recorder(self, sess: boto3.session.Session):
-        session = self.get_active_session()
-
-        path = './sessions/{}/api_recorder'.format(session.name)
-        if not os.path.exists(path):
-            os.mkdir(path)
-
-        api_recorder = placebo.attach(sess, data_path=path)
-
-        if self.api_recorder_mode == ApiRecorderMode.recording:
-            api_recorder.record('*', 'Get*,List*,Describe*')
-        elif self.api_recorder_mode == ApiRecorderMode.playback:
-            api_recorder.playback()
-        elif self.api_recorder_mode == ApiRecorderMode.stopped:
-            api_recorder.stop()
-
-        return api_recorder
+    class ApiRecorderMode(Enum):
+        stopped = 1
+        recording = 2
+        playback = 3
 
     def get_boto3_session(self, recording=ApiRecorderMode.recording):
-        session = self.get_active_session()
-        if not self.aws_session:
-            sess = boto3.session.Session(
+        if self.aws_session:
+            return self.aws_session
+        else:
+            session = self.get_active_session()
+            self.aws_session = boto3.session.Session(
                 aws_access_key_id=session.access_key_id,
                 aws_secret_access_key=session.secret_access_key,
-                aws_session_token=session.aws_session,
+                aws_session_token=session.session_token,
             )
-        self._setup_api_recorder(sess)
-        return sess
+
+            path = './sessions/{}/api_recorder'.format(session.name)
+            if not os.path.exists(path):
+                os.mkdir(path)
+
+            self.api_recorder = placebo.attach(self.aws_session, data_path=path, debug=True)
+            self.api_recorder.record('.*', '(Get|List|Describe).*')
+
+            return self.aws_session
 
     def get_boto3_client(self, service, region=None, user_agent=None, parameter_validation=True):
         session = self.get_active_session()
@@ -1402,7 +1409,8 @@ aws_secret_access_key = {}
             parameter_validation=parameter_validation
         )
 
-        client = self.get_boto3_session().client(
+        sess = self.get_boto3_session()
+        client = sess.client(
             service,
             region_name=region,  # Whether region has a value or is None, it will work here
             aws_access_key_id=session.access_key_id,
