@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+import functools
 import importlib
 import json
 import os

