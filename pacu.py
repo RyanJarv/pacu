@@ -6,12 +6,16 @@ import os
 import random
 import re
 import shlex
+import shutil
 import subprocess
 import datetime
 import sys
 import time
 import traceback
 import argparse
+from enum import Enum
+
+import placebo
 
 try:
     import requests
@@ -32,19 +36,20 @@ except ModuleNotFoundError as error:
     print('Pacu was not able to start because a required Python package was not found.\nRun `sh install.sh` to check and install Pacu\'s Python requirements.')
     sys.exit(1)
 
-
 class Main:
     COMMANDS = [
         'aws', 'data', 'exec', 'exit', 'help', 'import_keys', 'list', 'load_commands_file',
         'ls', 'quit', 'regions', 'run', 'search', 'services', 'set_keys', 'set_regions',
         'swap_keys', 'update_regions', 'whoami', 'swap_session', 'sessions',
-        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console'
+        'list_sessions', 'delete_session', 'export_keys', 'open_console', 'console', 'record'
     ]
 
     def __init__(self):
         self.database = None
         self.running_module_names = []
         self.CATEGORIES = self.load_categories()
+        self.aws_session: boto3.session.Session = None
+        self.api_recorder: placebo.pill.Pill = None
 
     # Utility methods
 
@@ -423,7 +428,7 @@ class Main:
         import the PacuSession model. """
         return PacuSession.get_active_session(self.database)
 
-    def get_aws_key_by_alias(self, alias):
+    def get_aws_key_by_alias(self, alias) -> AWSKey:
         """ Return an AWSKey with the supplied alias that is assigned to the
         currently active PacuSession from the database, or None if no AWSKey
         with the supplied alias exists. If more than one key with the alias
@@ -450,6 +455,9 @@ class Main:
             self.print('  Error: Unbalanced quotes in command')
             return
 
+        self.exec_command(command)
+
+    def exec_command(self, command):
         if not command or command[0] == '':
             return
         elif command[0] == 'data':
@@ -460,6 +468,8 @@ class Main:
             self.check_sessions()
         elif command[0] == 'delete_session':
             self.delete_session()
+        elif command[0] == 'api_recording':
+            self.api_recording(command[1])
         elif command[0] == 'export_keys':
             self.export_keys(command)
         elif command[0] == 'help':
@@ -653,6 +663,14 @@ class Main:
                                                   command to reset the region set to the default of all
                                                   supported regions
             run/exec <module name>              Execute a module
+            api_recording [on|off|playback]                 
+                                                Configures the API call/response recorder. By default this is on 
+                                                  and records are stored under sessions/<session name>/api_recorder.
+                                                  This act's as record of all resources discovered so far by
+                                                  Describe/Get/List. Setting this to playback mode will mock out 
+                                                  responses from this directory. This makes it easy to data gathered
+                                                  from various roles, even if your current user wouldn't normally
+                                                  have access to call a give API.
             set_keys                            Add a set of AWS keys to the session and set them as the
                                                   default
             swap_keys                           Change the currently active AWS key to another key that has
@@ -945,6 +963,8 @@ aws_secret_access_key = {}
             print('\n    set_regions <region> [<region>...]\n        Set the default regions for this session. These space-separated regions will be used for modules where\n          regions are required, but not supplied by the user. The default set of regions is every supported\n          region for the service. Supply "all" to this command to reset the region set to the default of all\n          supported regions\n')
         elif command_name == 'run' or command_name == 'exec':
             print('\n    run/exec <module name>\n        Execute a module\n')
+        elif command_name == 'api_recording':
+            print('\n    Configures the API call/response recorder. By default this is on and records are stored under sessions/<session name>/api_recorder. This act\'s as record of all resources discovered so far by Describe/Get/List. Setting this to playback mode will mock out \nresponses from this directory. This makes it easy to data gathered from various roles, even if your current\n user wouldn\'t normally have access to call a give API')
         elif command_name == 'set_keys':
             print('\n    set_keys\n        Add a set of AWS keys to the session and set them as the default\n')
         elif command_name == 'swap_keys':
@@ -1288,6 +1308,25 @@ aws_secret_access_key = {}
 
         return
 
+    def api_recording(self, arg):
+        if arg == "on":
+            self.api_recorder.record('.*', '(Get|List|Describe).*')
+        elif arg == "off":
+            self.api_recorder.stop()
+        elif arg == "playback":
+            self.api_recorder.playback()
+        elif arg == "clear":
+            path = os.path.abspath(self.api_recorder.data_path)
+            resp = self.input("Are you sure you want to delete {}? (y/n) ".format(path))
+            if resp.lower() == 'y':
+                self.print("Deleting {}....".format(path))
+                shutil.rmtree(path)
+            elif resp.lower() == 'n':
+                self.print("Ok, nothing was deleted.".format(path))
+            else:
+                self.print("Must enter either y or n, nothing was deleted.")
+
+
     def get_data_from_traceback(self, tb):
         session = None
         global_data_in_all_frames = list()
@@ -1322,6 +1361,30 @@ aws_secret_access_key = {}
                 self.print('  User agent for this session set to:')
                 self.print('    {}'.format(new_ua))
 
+    class ApiRecorderMode(Enum):
+        stopped = 1
+        recording = 2
+        playback = 3
+
+    def get_boto3_session(self):
+        return self.aws_session
+
+    def api_recorder_init(self):
+        session = self.get_active_session()
+        self.aws_session = boto3.session.Session(
+            aws_access_key_id=session.access_key_id,
+            aws_secret_access_key=session.secret_access_key,
+            aws_session_token=session.session_token,
+        )
+
+        path = './sessions/{}/api_recorder'.format(session.name)
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+        self.api_recorder = placebo.attach(self.aws_session, data_path=path, debug=True)
+        self.api_recorder.record('.*', '(Get|List|Describe).*')
+
+
     def get_boto3_client(self, service, region=None, user_agent=None, parameter_validation=True):
         session = self.get_active_session()
 
@@ -1345,7 +1408,8 @@ aws_secret_access_key = {}
             parameter_validation=parameter_validation
         )
 
-        return boto3.client(
+        sess = self.get_boto3_session()
+        client = sess.client(
             service,
             region_name=region,  # Whether region has a value or is None, it will work here
             aws_access_key_id=session.access_key_id,
@@ -1353,6 +1417,9 @@ aws_secret_access_key = {}
             aws_session_token=session.session_token,
             config=boto_config
         )
+
+        return client
+
 
     def get_boto3_resource(self, service, region=None, user_agent=None, parameter_validation=True):
         # All the comments from get_boto3_client apply here too
@@ -1373,7 +1440,7 @@ aws_secret_access_key = {}
             parameter_validation=parameter_validation
         )
 
-        return boto3.resource(
+        return self.get_boto3_session().resource(
             service,
             region_name=region,
             aws_access_key_id=session.access_key_id,
@@ -1515,6 +1582,8 @@ aws_secret_access_key = {}
             session_index = session_names.index(session)
             sessions[session_index].is_active = True
 
+        self.api_recorder_init()
+
         if module_name is not None:
             module = ['exec', module_name]
 
@@ -1598,6 +1667,8 @@ aws_secret_access_key = {}
                     self.database = get_database_connection(settings.DATABASE_CONNECTION_PATH)
 
                     self.check_sessions()
+
+                    self.api_recorder_init()
 
                     self.initialize_tab_completion()
                     self.display_pacu_help()
