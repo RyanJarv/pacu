@@ -8,24 +8,17 @@ import sys
 import botocore
 import mypy_boto3_sts
 
-from modules.iam__pivot_v2 import lib
+import boto3
+
 import principalmapper.common
 from principalmapper.graphing import graph_actions
-from principalmapper.graphing.edge_identification import obtain_edges
 from principalmapper.querying.query_utils import get_search_list
-
-import boto3
-import io
 from principalmapper.graphing import gathering
 from principalmapper.common.edges import Escalation, Edge
 from principalmapper.graphing.edge_checker import EscalationChecker
-import mypy_boto3_iam.client
 from principalmapper.common import Node, Group, Policy, Graph
-from typing import List, Optional, Callable
 
-from pyparsing import Optional
-
-from modules.iam__pivot_v2 import escalations
+from modules.iam__pivot_v2 import lib
 
 module_info = {
     'name': 'pivot',
@@ -46,17 +39,16 @@ parser.add_argument('--rebuild-db', required=False, default=False, action='store
 
 
 class IamEscalationChecker(EscalationChecker):
-    def can_escalate(self, source: Node, dest: Node) -> List[Escalation]:
-        results: List[Escalation] = []
-        if ':user/' in dest.arn:
-            results.append(lib.change_user_access_keys),
-            results.append(lib.change_user_password),
-            results.append(lib.create_access_key)
-        if ':role/' in dest.arn:
-             results.append(lib.change_role_trust_doc)
+    def user_escalations(self):
+        return [
+            lib.change_user_access_keys,
+            lib.change_user_password,
+            lib.change_role_trust_doc
+        ]
 
-        return [escalation for escalation in results if escalation]
 
+    def role_escalations(self):
+        return [lib.change_role_trust_doc]
 
 def main(args, pacu_main):
     session = pacu_main.get_active_session()
@@ -70,16 +62,18 @@ def main(args, pacu_main):
 
     principalmapper.graphing.gathering.edge_identification.checker_map = checker_map
 
-    graph_path = "./sessions/{}/pmapper/".format(session.name)
+    graph_path = os.path.abspath("./sessions/{}/pmapper".format(session.name))
+    os.makedirs(graph_path, 0o0700, True)
     try:
         graph = graph_actions.get_graph_from_disk(graph_path)
-    except ValueError as e:
-        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'])
-    finally:
+        graph.store_graph_as_json(graph_path)
+    except FileNotFoundError as e:
+        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'], debug=True)
         graph.store_graph_as_json(graph_path)
 
-    # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'])
-    graph.edges = graph_actions.gathering.edge_identification.obtain_edges(aws_sess, ['iam'], graph.nodes, sys.stdout, debug=True)
+    # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'], debug=True)
+    # graph.store_graph_as_json(graph_path)
+    # graph.edges = graph_actions.gathering.edge_identification.obtain_edges(aws_sess, ['iam'], graph.nodes, sys.stdout, debug=True)
 
     graph.store_graph_as_json(graph_path)
 
