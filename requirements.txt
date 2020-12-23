@@ -1,6 +1,6 @@
 awscli
 boto3
-boto3-stubs[s3,ec2,iam,sts,lambda]
+boto3-stubs[essential]
 botocore
 s3transfer==0.1.13
 flake8==3.5.0

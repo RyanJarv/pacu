@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 import argparse
 import collections
-import functools
+import json
 import os
 import sys
 
-import botocore
-import mypy_boto3_sts
-
 import boto3
+
+from modules.iam__pivot_v2.escalation import IamEscalationChecker, StsEscalationChecker
 
 import principalmapper.common
 from principalmapper.graphing import graph_actions
 from principalmapper.querying.query_utils import get_search_list
 from principalmapper.graphing import gathering
-from principalmapper.common.edges import Escalation, Edge
-from principalmapper.graphing.edge_checker import EscalationChecker
-from principalmapper.common import Node, Group, Policy, Graph
-
-from modules.iam__pivot_v2 import lib
+from principalmapper.common import Graph
 
 module_info = {
     'name': 'pivot',
@@ -32,25 +27,13 @@ module_info = {
 
 # Every module must include an ArgumentParser named "parser", even if it
 # doesn't use any additional arguments.
-parser = argparse.ArgumentParser(add_help=False, description=module_info['description'])
+parser = argparse.ArgumentParser(add_help=False, description=json.dumps(module_info['description']))
 parser.add_argument('--rebuild-db', required=False, default=False, action='store_true',
                     help='Rebuild db used in this module, this will not affect other modules. This is needed to pick '
                          'up new or changed permissions.')
 
-
-class IamEscalationChecker(EscalationChecker):
-    def user_escalations(self):
-        return [
-            lib.change_user_access_keys,
-            lib.change_user_password,
-            lib.change_role_trust_doc
-        ]
-
-
-    def role_escalations(self):
-        return [lib.change_role_trust_doc]
-
 def main(args, pacu_main):
+    args = parser.parse_args(args)
     session = pacu_main.get_active_session()
     print = pacu_main.print
     input = pacu_main.input
@@ -58,24 +41,26 @@ def main(args, pacu_main):
     aws_sess = pacu_main.get_boto3_session()
     fetch_data = pacu_main.fetch_data
 
-    #pacu_main.api_recorder.playback()
+    # pacu_main.api_recorder.playback()
+    # if pacu_main.fetch_data(['IAM'], 'iam__enum_permissions', '') is False:
+    #     print('Pre-req module not run successfully. Continuing anyways')
+    # pacu_main.api_recorder.record()
+
 
     principalmapper.graphing.gathering.edge_identification.checker_map = checker_map
 
     graph_path = os.path.abspath("./sessions/{}/pmapper".format(session.name))
     os.makedirs(graph_path, 0o0700, True)
-    try:
+    #if args.rebuild_db or not os.path.exists(graph_path):
+    if args.rebuild_db or not os.path.exists(graph_path):
+        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam', 'sts'], debug=False)
+        graph.store_graph_as_json(graph_path)
+    else:
         graph = graph_actions.get_graph_from_disk(graph_path)
-        graph.store_graph_as_json(graph_path)
-    except FileNotFoundError as e:
-        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'], debug=True)
-        graph.store_graph_as_json(graph_path)
 
-    # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam'], debug=True)
+    # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam', 'sts'], debug=True)
+    # graph.edges = graph_actions.gathering.edge_identification.obtain_edges(session=aws_sess._session, checker_list=['iam', 'sts'], nodes=graph.nodes, output=sys.stdout)
     # graph.store_graph_as_json(graph_path)
-    # graph.edges = graph_actions.gathering.edge_identification.obtain_edges(aws_sess, ['iam'], graph.nodes, sys.stdout, debug=True)
-
-    graph.store_graph_as_json(graph_path)
 
     source_node = get_current_node(graph, user)
     data = collections.OrderedDict()
@@ -87,18 +72,18 @@ def main(args, pacu_main):
 
     target = ask_for_target(data, input, print)
 
+    # TODO: construct summary from each target response
     for edge in data[target]:
-        edge: Escalation
         edge.run(pacu_main, print, input, fetch_data)
 
     return target.destination
 
 
 checker_map = {
+    'sts': StsEscalationChecker,
     'iam': IamEscalationChecker,
     # 'lambda': LambdaEdgeChecker,
     # 'ssm': SSMEdgeChecker,
-    # 'sts': STSEdgeChecker
 }
 
 def summary(data, pacu_main):

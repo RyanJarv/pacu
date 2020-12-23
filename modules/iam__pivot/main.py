@@ -105,4 +105,15 @@ def rebuild_db(sess, root) -> Graph:
     graph.store_graph_as_json(root)
     return graph
 
-
+def ask_for_target(data, input, print):
+    keys = list(data.keys())
+    item = 1
+    for target, edge_list in data.items():
+        print("    ({}) {}".format(item, target.destination.searchable_name()))
+        for edge in edge_list:
+            print("          * {} -> {} -> {}".format(edge.source.arn, edge.reason, edge.destination.arn))
+        print("          * {} is the target".format(edge.destination.arn))
+        item += 1
+    response = int(input("Choose role to assume: "))
+    target = keys[response - 1]
+    return target
