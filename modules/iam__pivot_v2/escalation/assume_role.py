@@ -23,36 +23,10 @@ class AssumeRole(StsEscalationChecker):
         pacu_main.set_keys(target.searchable_name(), creds['AccessKeyId'], creds['SecretAccessKey'],
                            creds['SessionToken'])
 
-    # filter = Filter(
-    #     # NO_MATCH is filtered since resource policy must match for sts:AssumeRole, even in same-account scenarios
-    #     # TODO: verify this behavior
-    #     ResourceAction(Action='sts:AssumeRole', FilterOn=[
-    #         ResourcePolicyEvalResult.DENY_MATCH,
-    #         ResourcePolicyEvalResult.NO_MATCH
-    #     ]),
-    #     PolicyAction(Action='sts:AssumeRole', ConditionKeys={
-    #         'aws:MultiFactorAuthAge': '1',
-    #         'aws:MultiFactorAuthPresent': 'true'
-    #     })
-    # )
-
-    @staticmethod
-    def filter_sources(node: Node) -> bool:
-        return query.local_check_authorization(node, 'sts:AssumeRole', '*', {})
-
-    @staticmethod
-    def filter_dests(node: Node) -> bool:
-        return query.resource_policy_authorization(node, '*', ) \
-               and policy_has_matching_statement(node.trust_policy, 'sts:AssumeRole', 'Allow', '*', {})
-        node.trust_policy
-
     @classmethod
     def escalations(cls, source: Node, dest: Node) -> Iterator[Escalation]:
         # Check against resource policy
-        policy_denies_mfa = has_matching_statement(source, 'Deny', 'sts:AssumeRole', dest.arn, {
-            'aws:MultiFactorAuthAge': '1',
-            'aws:MultiFactorAuthPresent': 'true'
-        })
+        sim_result = resource_policy_auth(source, arns.get_account_id(source.arn), dest.trust_policy, 'sts:AssumeRole', dest.arn, {})
 
         assume_auth, need_mfa = query.local_check_authorization_handling_mfa(source, 'sts:AssumeRole', dest.arn, {})
         policy_denies = has_matching_statement(source, 'Deny', 'sts:AssumeRole', dest.arn, {})
@@ -60,6 +34,7 @@ class AssumeRole(StsEscalationChecker):
             'aws:MultiFactorAuthAge': '1',
             'aws:MultiFactorAuthPresent': 'true'
         })
+
         if assume_auth:
             if need_mfa:
                 reason = '(requires MFA) can access via sts:AssumeRole'
