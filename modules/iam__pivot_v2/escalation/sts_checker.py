@@ -1,30 +1,43 @@
-from typing import Iterator, Callable, Dict
+from dataclasses import dataclass, field
+from typing import Iterator, Callable, Dict, Optional, List
 
-from . import EscalationChecker
+from principalmapper.querying import query_interface
+from principalmapper.querying.local_policy_simulation import ResourcePolicyEvalResult, has_matching_statement, \
+    policies_include_matching_allow_action, policy_has_matching_statement
+from principalmapper.util import arns
+from . import EscalationChecker, resource_policy_auth
 
 from principalmapper.common import Node
 from ..common import Escalation
 
 
-class StsEscalationChecker(EscalationChecker):
-    #_user_escalations: Dict[str, Callable] = {}
-    _role_escalations: Dict[str, Callable] = {}
+@dataclass
+class Config:
+    """Class for keeping track of an item in inventory."""
+    ResourceActions: List[str] = field(default=[])
+    PolicyActions: List[str] = field(default=[])
 
-    def get_role_escalations(self):
-        return self._role_escalations
+
+class StsEscalationChecker(EscalationChecker):
+    config = Config()
 
     @classmethod
-    def register_role_escalation(cls, func: Callable):
-        """Register a user escalation checking function"""
-        if func.__name__ in cls.get_role_escalations(cls):
-            raise UserWarning('The user function {} is registered twice'.format(func.__name__))
-        cls._role_escalations[func.__name__] = func
-        return func
+    def escalations(cls, source: Node, dest: Node) -> Iterator[Escalation]:
+        if ':/user' in source.arn:
+            return iter([])
+        for sub in cls.subclass_escalations:
+            sub: StsEscalationChecker
+            sub.filter
 
-    def can_escalate_to_role(self, source: Node, dest: Node) -> Iterator[Escalation]:
-        for name, func in self.get_role_escalations().items():
-            escalation = func(source, dest)
-            if escalation:
-                yield escalation
-            else:
-                continue
+    def filter_sources(cls, source: Node) -> bool:
+        """ Uses the Config dataclass to filter nodes from being sent to subclasses, filtering is done in the base class
+        to avoid O(N^2) processing on the size of the node list.
+        """
+        for action in cls.config.ResourceActions:
+            return not policies_include_matching_allow_action(source, action.Action)
+
+    def filter_dests(cls, dest: Node) -> bool:
+        if policy_has_matching_statement(cls.match_all_trust_policy, 'Allow', 'sts:AssumeRole', dest, {}) \
+                and not policy_has_matching_statement(cls.match_all_trust_policy, 'Deny', 'sts:AssumeRole', dest, {}) \
+                and not ':/user' in dest.arn:
+            return False
