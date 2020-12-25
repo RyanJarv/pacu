@@ -1,11 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Iterator, Callable, Dict, Optional, List
+from typing import Iterator, List
 
-from principalmapper.querying import query_interface
-from principalmapper.querying.local_policy_simulation import ResourcePolicyEvalResult, has_matching_statement, \
-    policies_include_matching_allow_action, policy_has_matching_statement
-from principalmapper.util import arns
-from . import EscalationChecker, resource_policy_auth
+from principalmapper.querying.local_policy_simulation import policies_include_matching_allow_action, policy_has_matching_statement
+from . import EscalationChecker
 
 from principalmapper.common import Node
 from ..common import Escalation

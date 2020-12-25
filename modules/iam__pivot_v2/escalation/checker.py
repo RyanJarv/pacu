@@ -1,16 +1,14 @@
-import collections
 import itertools
 
 import io
 import os
 
 from typing import Dict, List, Callable, Iterator
-from dataclasses import dataclass
 
 from modules.iam__pivot_v2.common import Escalation
 
 from principalmapper.graphing.edge_checker import EdgeChecker
-from principalmapper.common import Node, Edge
+from principalmapper.common import Node
 
 USER_ESCALATIONS: Dict[str, Callable] = {}
 ROLE_ESCALATIONS: Dict[str, Callable] = {}

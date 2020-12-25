@@ -1,17 +1,13 @@
-from typing import Optional, Iterator
+from typing import Iterator
 
-import boto3
 import mypy_boto3_sts
-from boto.ec2.volumestatus import Action
 
 from modules.iam__pivot_v2.common import Escalation
-from .sts_checker import StsEscalationChecker, Filter, Action, ResourceAction, PolicyAction
+from .sts_checker import StsEscalationChecker
 
 from principalmapper.querying import query_interface as query
-from principalmapper.querying.local_policy_simulation import resource_policy_authorization as resource_policy_auth, \
-    policy_has_matching_statement
-from principalmapper.querying.query_interface import Node, ResourcePolicyEvalResult, \
-    has_matching_statement
+from principalmapper.querying.local_policy_simulation import resource_policy_authorization as resource_policy_auth
+from principalmapper.querying.query_interface import Node, ResourcePolicyEvalResult, has_matching_statement
 from principalmapper.util import arns
 
 
