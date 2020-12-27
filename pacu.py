@@ -4,6 +4,7 @@ import functools
 import importlib
 import json
 import os
+import pathlib
 import random
 import re
 import shlex
@@ -1316,6 +1317,8 @@ aws_secret_access_key = {}
             self.api_recorder.stop()
         elif arg == "playback":
             self.api_recorder.playback()
+        elif arg == "cache":
+            self.api_recorder.cache()
         elif arg == "clear":
             path = os.path.abspath(self.api_recorder.data_path)
             resp = self.input("Are you sure you want to delete {}? (y/n) ".format(path))
@@ -1326,6 +1329,8 @@ aws_secret_access_key = {}
                 self.print("Ok, nothing was deleted.".format(path))
             else:
                 self.print("Must enter either y or n, nothing was deleted.")
+        else:
+            raise UserWarning("Invalid option {}".format(arg))
 
 
     def get_data_from_traceback(self, tb):
@@ -1378,9 +1383,9 @@ aws_secret_access_key = {}
             aws_session_token=session.session_token,
         )
 
-        path = './sessions/{}/api_recorder'.format(session.name)
-        if not os.path.exists(path):
-            os.mkdir(path)
+        account_id = self.get_boto3_client('sts').get_caller_identity()['Account']
+        path = './sessions/{}/api_recorder/{}'.format(session.name, account_id)
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
 
         self.api_recorder = placebo.attach(self.aws_session, data_path=path, debug=True)
         self.api_recorder.record('.*', '(Get|List|Describe).*')
