@@ -3,7 +3,8 @@ from typing import Iterator
 import mypy_boto3_sts
 
 from modules.iam__pivot_v2.common import Escalation
-from .sts_checker import StsEscalationChecker
+#from . import StsEscalationChecker
+from .escalation_checker import EscalationChecker
 
 from principalmapper.querying import query_interface as query
 from principalmapper.querying.local_policy_simulation import resource_policy_authorization as resource_policy_auth
@@ -11,17 +12,18 @@ from principalmapper.querying.query_interface import Node, ResourcePolicyEvalRes
 from principalmapper.util import arns
 
 
-class AssumeRole(StsEscalationChecker):
-    @staticmethod
-    def run(pacu_main, source, target):
+class AssumeRole(EscalationChecker):
+    def setup(self):
+        self.required_source_actions = ['sts:AssumeRole']
+        self.required_dest_trust_policy_actions = ['sts:AssumeRole']
+
+    def run(self, pacu_main, source, target):
         print("Assuming Role: " + target.arn)
         sts: mypy_boto3_sts.client.STSClient = pacu_main.get_boto3_client('sts')
         creds = sts.assume_role(RoleArn=target.arn, RoleSessionName="pacu")['Credentials']
-        pacu_main.set_keys(target.searchable_name(), creds['AccessKeyId'], creds['SecretAccessKey'],
-                           creds['SessionToken'])
+        pacu_main.set_keys(target.searchable_name(), creds['AccessKeyId'], creds['SecretAccessKey'], creds['SessionToken'])
 
-    @classmethod
-    def escalations(cls, source: Node, dest: Node) -> Iterator[Escalation]:
+    def escalations(self, source: Node, dest: Node) -> Iterator[Escalation]:
         # Check against resource policy
         sim_result = resource_policy_auth(source, arns.get_account_id(source.arn), dest.trust_policy, 'sts:AssumeRole', dest.arn, {}, debug=False)
 
@@ -38,13 +40,12 @@ class AssumeRole(StsEscalationChecker):
             else:
                 reason = 'can access via sts:AssumeRole'
 
-            new_esc = Escalation(source, dest, escalate_func=AssumeRole.run, reason=reason)
+            new_esc = Escalation(source, dest, escalate_func=self.run, reason=reason)
             print('Found new edge: {}\n'.format(new_esc.describe_edge()))
             yield new_esc
         elif not (policy_denies_mfa and policy_denies) and sim_result == ResourcePolicyEvalResult.NODE_MATCH:
             # testing same-account scenario, so NODE_MATCH will override a lack of an allow from iam policy
-            new_esc = Escalation(source, dest, escalate_func=NotImplementedError,
-                                 reason='can access via sts:AssumeRole')
+            new_esc = Escalation(source, dest, escalate_func=NotImplementedError, reason='can access via sts:AssumeRole')
             print('Found new edge: {}\n'.format(new_esc.describe_edge()))
 
             yield new_esc
