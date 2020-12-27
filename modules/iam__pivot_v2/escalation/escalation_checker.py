@@ -37,8 +37,11 @@ class EscalationChecker(EdgeChecker):
 
     def __init__(self, session: botocore.session.Session):
         self.session = session
-        self.required_dest_trust_policy_actions: List
-        self.required_source_actions: List
+        self.required_dest_trust_policy_actions: List = []
+        self.required_source_actions: List = []
+
+        # If True stop looking for path's once we find an admin role
+        self.filter_source_admin: bool = True
 
     @classmethod
     def _setup(cls, self):
@@ -61,6 +64,9 @@ class EscalationChecker(EdgeChecker):
         """ Uses the Config dataclass to filter nodes from being sent to subclasses, filtering is done in the base class
         to avoid O(N^2) processing on the size of the node list.
         """
+        if self.filter_source_admin and source.is_admin:
+            return False
+
         for action in self.required_source_actions:
             if not policies_include_matching_allow_action(source, action):
                 return False

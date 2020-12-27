@@ -3,16 +3,11 @@ import argparse
 import collections
 import json
 import os
-import sys
 
 import boto3
 
-#from modules.iam__pivot_v2.escalation import IamEscalationChecker, StsEscalationChecker, EscalationChecker
-
 import principalmapper.common
-#from modules.iam__pivot_v2.escalation import StsEscalationChecker
 from modules.iam__pivot_v2.escalation import StsEscalationChecker
-from modules.iam__pivot_v2.escalation.escalation_checker import EscalationChecker
 from principalmapper.graphing import graph_actions
 from principalmapper.querying.query_utils import get_search_list
 from principalmapper.graphing import gathering
@@ -35,38 +30,28 @@ parser.add_argument('--rebuild-db', required=False, default=True, action='store_
                     help='Rebuild db used in this module, this will not affect other modules. This is needed to pick '
                          'up new or changed permissions.')
 
+
 def main(args, pacu_main):
     args = parser.parse_args(args)
     session = pacu_main.get_active_session()
     print = pacu_main.print
     input = pacu_main.input
-    user = pacu_main.key_info()
     aws_sess = pacu_main.get_boto3_session()
-    fetch_data = pacu_main.fetch_data
 
-    # pacu_main.api_recorder.playback()
-    # if pacu_main.fetch_data(['IAM'], 'iam__enum_permissions', '') is False:
-    #     print('Pre-req module not run successfully. Continuing anyways')
-    # pacu_main.api_recorder.record()
-
+    if pacu_main.fetch_data(['IAM'], 'iam__enum_permissions', '') is False:
+        print('Pre-req module not run successfully. Continuing anyways')
 
     principalmapper.graphing.gathering.edge_identification.checker_map = checker_map
 
     graph_path = os.path.abspath("./sessions/{}/pmapper".format(session.name))
     os.makedirs(graph_path, 0o0700, True)
-    #if args.rebuild_db or not os.path.exists(graph_path):
-    # if False or not os.path.exists(graph_path):
-    #     graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['sts'], debug=False)
-    #     graph.store_graph_as_json(graph_path)
-    # else:
-    #     graph = graph_actions.get_graph_from_disk(graph_path)
+    if args.rebuild_db or not os.path.exists(graph_path):
+        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['sts'], debug=False)
+        graph.store_graph_as_json(graph_path)
+    else:
+        graph = graph_actions.get_graph_from_disk(graph_path)
 
-    # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam', 'sts'], debug=True)
-    graph = graph_actions.get_graph_from_disk(graph_path)
-    graph.edges = graph_actions.gathering.edge_identification.obtain_edges(session=aws_sess._session, checker_list=['sts'], nodes=graph.nodes, output=sys.stdout)
-    graph.store_graph_as_json(graph_path)
-
-    source_node = get_current_node(graph, user)
+    source_node = get_current_node(graph, pacu_main.key_info())
     data = collections.OrderedDict()
     for edge_list in get_search_list(graph, source_node):
         data[edge_list[-1]] = edge_list
@@ -85,10 +70,8 @@ def main(args, pacu_main):
 
 checker_map = {
     'sts': StsEscalationChecker,
-#    'iam': IamEscalationChecker,
-    # 'lambda': LambdaEdgeChecker,
-    # 'ssm': SSMEdgeChecker,
 }
+
 
 def summary(data, pacu_main):
     if not data:
@@ -100,6 +83,7 @@ def sess_from_h(user) -> boto3.session.Session:
     return boto3.session.Session(aws_access_key_id=user['AccessKeyId'], aws_secret_access_key=user['SecretAccessKey'],
                                  aws_session_token=user['SessionToken'])
 
+
 def get_current_node(graph: Graph, user):
     if user["UserName"]:
         source_name = 'user/{}'.format(user["UserName"])
@@ -109,6 +93,7 @@ def get_current_node(graph: Graph, user):
         raise UserWarning("No current user or role found")
 
     return graph.get_node_by_searchable_name(source_name)
+
 
 def ask_for_target(data, input, print):
     keys = list(data.keys())
