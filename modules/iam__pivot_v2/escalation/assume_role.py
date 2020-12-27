@@ -10,9 +10,10 @@ from principalmapper.querying import query_interface as query
 from principalmapper.querying.local_policy_simulation import resource_policy_authorization as resource_policy_auth
 from principalmapper.querying.query_interface import Node, ResourcePolicyEvalResult, has_matching_statement
 from principalmapper.util import arns
+from .sts_checker import StsEscalationChecker
 
 
-class AssumeRole(EscalationChecker):
+class AssumeRole(StsEscalationChecker):
     def setup(self):
         self.required_source_actions = ['sts:AssumeRole']
         self.required_dest_trust_policy_actions = ['sts:AssumeRole']

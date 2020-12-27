@@ -11,6 +11,7 @@ import boto3
 
 import principalmapper.common
 #from modules.iam__pivot_v2.escalation import StsEscalationChecker
+from modules.iam__pivot_v2.escalation import StsEscalationChecker
 from modules.iam__pivot_v2.escalation.escalation_checker import EscalationChecker
 from principalmapper.graphing import graph_actions
 from principalmapper.querying.query_utils import get_search_list
@@ -83,7 +84,7 @@ def main(args, pacu_main):
 
 
 checker_map = {
-    'sts': EscalationChecker,
+    'sts': StsEscalationChecker,
 #    'iam': IamEscalationChecker,
     # 'lambda': LambdaEdgeChecker,
     # 'ssm': SSMEdgeChecker,

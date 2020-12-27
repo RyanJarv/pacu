@@ -15,6 +15,8 @@ from principalmapper.common import Node, Policy
 from principalmapper.querying.local_policy_simulation import policy_has_matching_statement, \
     policies_include_matching_allow_action
 
+import mypy_boto3_sts
+
 policy_allow_all = Policy("arn:aws:iam::922105094392:policy/policy_allow_all", "policy_allow_all", {
     "Version": "2012-10-17",
     "Statement": [
@@ -31,17 +33,21 @@ policy_allow_all = Policy("arn:aws:iam::922105094392:policy/policy_allow_all", "
 
 
 class EscalationChecker(EdgeChecker):
+    identity: mypy_boto3_sts.client.STSClient.get_caller_identity = None
+
     def __init__(self, session: botocore.session.Session):
-        super().__init__(session)
+        self.session = session
+        self.required_dest_trust_policy_actions: List
+        self.required_source_actions: List
 
-        sts = session.create_client('sts')
-        self.identity = sts.get_caller_identity()
+    @classmethod
+    def _setup(cls, self):
+        """Since __init__ will be called for every subclass, cache anything expensive as class attributes here."""
+        sts: mypy_boto3_sts.client.STSClient = self.session.create_client('sts')
+        cls.identity = sts.get_caller_identity()
 
-        self.required_dest_trust_policy_actions = []
-        self.required_source_actions = []
-
-    # SubClasses can set various config options here without needing to override __init__() and call super()
     def setup(self):
+        """SubClasses can set various config options here without needing to override __init__() and call super()"""
         pass
 
     @abc.abstractmethod
@@ -73,6 +79,7 @@ class EscalationChecker(EdgeChecker):
         return True
 
     def _subclass_escalations(self, srcs: Iterator[Node], dsts: Iterator[Node]) -> Iterator[Escalation]:
+        self._setup(self)
         for sub_cls in self.__class__.__subclasses__():
             inst = sub_cls(self.session)
             inst.setup()
