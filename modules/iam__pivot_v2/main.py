@@ -52,15 +52,16 @@ def main(args, pacu_main):
     graph_path = os.path.abspath("./sessions/{}/pmapper".format(session.name))
     os.makedirs(graph_path, 0o0700, True)
     #if args.rebuild_db or not os.path.exists(graph_path):
-    if args.rebuild_db or not os.path.exists(graph_path):
-        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam', 'sts'], debug=False)
-        graph.store_graph_as_json(graph_path)
-    else:
-        graph = graph_actions.get_graph_from_disk(graph_path)
+    # if False or not os.path.exists(graph_path):
+    #     graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['sts'], debug=False)
+    #     graph.store_graph_as_json(graph_path)
+    # else:
+    #     graph = graph_actions.get_graph_from_disk(graph_path)
 
     # graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['iam', 'sts'], debug=True)
-    # graph.edges = graph_actions.gathering.edge_identification.obtain_edges(session=aws_sess._session, checker_list=['iam', 'sts'], nodes=graph.nodes, output=sys.stdout)
-    # graph.store_graph_as_json(graph_path)
+    graph = graph_actions.get_graph_from_disk(graph_path)
+    graph.edges = graph_actions.gathering.edge_identification.obtain_edges(session=aws_sess._session, checker_list=['sts'], nodes=graph.nodes, output=sys.stdout)
+    graph.store_graph_as_json(graph_path)
 
     source_node = get_current_node(graph, user)
     data = collections.OrderedDict()
@@ -74,7 +75,7 @@ def main(args, pacu_main):
 
     # TODO: construct summary from each target response
     for edge in data[target]:
-        edge.run(pacu_main, print, input, fetch_data)
+        edge.run(pacu_main)
 
     return target.destination
 

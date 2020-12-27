@@ -12,7 +12,8 @@ from principalmapper.util import arns
 
 
 class AssumeRole(StsEscalationChecker):
-    def run(self, pacu_main, target):
+    @staticmethod
+    def run(pacu_main, source, target):
         print("Assuming Role: " + target.arn)
         sts: mypy_boto3_sts.client.STSClient = pacu_main.get_boto3_client('sts')
         creds = sts.assume_role(RoleArn=target.arn, RoleSessionName="pacu")['Credentials']
@@ -22,7 +23,7 @@ class AssumeRole(StsEscalationChecker):
     @classmethod
     def escalations(cls, source: Node, dest: Node) -> Iterator[Escalation]:
         # Check against resource policy
-        sim_result = resource_policy_auth(source, arns.get_account_id(source.arn), dest.trust_policy, 'sts:AssumeRole', dest.arn, {})
+        sim_result = resource_policy_auth(source, arns.get_account_id(source.arn), dest.trust_policy, 'sts:AssumeRole', dest.arn, {}, debug=False)
 
         assume_auth, need_mfa = query.local_check_authorization_handling_mfa(source, 'sts:AssumeRole', dest.arn, {})
         policy_denies = has_matching_statement(source, 'Deny', 'sts:AssumeRole', dest.arn, {})
@@ -37,7 +38,7 @@ class AssumeRole(StsEscalationChecker):
             else:
                 reason = 'can access via sts:AssumeRole'
 
-            new_esc = Escalation(source, dest, escalate_func=AssumeRole, reason=reason)
+            new_esc = Escalation(source, dest, escalate_func=AssumeRole.run, reason=reason)
             print('Found new edge: {}\n'.format(new_esc.describe_edge()))
             yield new_esc
         elif not (policy_denies_mfa and policy_denies) and sim_result == ResourcePolicyEvalResult.NODE_MATCH:
