@@ -1,10 +1,12 @@
 import datetime
 import json
 import copy
+from typing import List
 
+from mypy_boto3_iam.type_defs import *
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, ForeignKey, inspect, Integer, Text
+    Boolean, CheckConstraint, Column, DateTime, ForeignKey, inspect, Integer, Text, String
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils import JSONType
@@ -205,5 +207,133 @@ class PacuSession(Base, ModelUpdateMixin):
 
         return remove_empty_from_dict(all_data)
 
-    
-   
+class InlinePolicy(Base):
+    __tablename__ = "inline_policies"
+
+    def __init__(self, resp: GetUserPolicyResponseTypeDef):
+        del resp['ResponseMetadata']
+        super().__init__(**resp)
+
+    id = Column(Integer, primary_key=True)
+    UserName = Column(String)
+    PolicyName = Column(String)
+    PolicyDocument = Column(JSONType)
+
+    identity_id = Column(Integer, ForeignKey('identity.id'))
+    identity = relationship("Identity", back_populates="inline_policies")
+
+policy_attachments = Table('policy_attachments', Base.metadata,
+        Column('identity_id', Integer, ForeignKey('identity.id')),
+        Column('policy_id', Integer, ForeignKey('policy.id')),
+)
+
+class PolicyVersion(Base):
+    __tablename__ = "policy_version"
+
+    def __init__(self, resp: GetPolicyVersionResponseTypeDef):
+        super().__init__(**resp['PolicyVersion'])
+
+    VersionId: str = Column(String, primary_key=True)
+    PolicyVersion = Column(String)
+    Document: dict = Column(JSONType)
+    IsDefaultVersion: bool = Column(Boolean)
+    CreateDate: str = Column(String)
+
+    policy_id: int = Column(Integer, ForeignKey('policy.id'))
+    policy = relationship("Policy", back_populates="versions")
+
+class Policy(Base):
+    __tablename__ = "policy"
+
+    def __init__(self, resp: GetPolicyResponseTypeDef):
+        super().__init__(**resp['Policy'])
+
+    id = Column(Integer, primary_key=True)
+    PolicyName = Column(String)
+    PolicyId = Column(String)
+    Arn = Column(String)
+    Path = Column(String)
+    DefaultVersionId = Column(String)
+    AttachmentCount = Column(String)
+    PermissionsBoundaryUsageCount = Column(Integer)
+    IsAttachable = Column(Boolean)
+    Description = Column(String)
+    CreateDate = Column(String)
+    UpdateDate = Column(String)
+
+    attached_to = relationship("Identity", secondary=policy_attachments, back_populates="attached_policies")
+    versions: List[PolicyVersion] = relationship("PolicyVersion", back_populates="policy")
+
+class Identity(Base):
+    def __init__(self, resp):
+        super().__init__(**resp)
+
+    __tablename__ = "identity"
+
+    id: int = Column(Integer, primary_key=True)
+
+    Path: str = Column(String)
+    Arn: str = Column(String, unique=True)
+    CreateDate: str = Column(String)
+    Tags: List[type_defs.TagTypeDef] = Column(JSONType)
+
+    inline_policies: InlinePolicy = relationship("InlinePolicy", cascade="all, delete-orphan", back_populates="identity")
+    attached_policies = relationship("Policy", secondary=policy_attachments)
+
+    type: str = Column(String(20))
+
+    __mapper_args__ = {
+        'polymorphic_on': type,
+        'polymorphic_identity': 'identity'
+    }
+
+class User(Identity):
+    def __init__(self, resp: GetUserResponseTypeDef):
+        super().__init__(resp["User"])
+
+    __tablename__ = "user"
+
+    UserName: str = Column(String)
+    UserId: str = Column(String)
+
+    id = Column(Integer, ForeignKey('identity.id'), primary_key=True)
+    __mapper_args__ = {
+        'polymorphic_identity': 'user'
+    }
+
+class Role(Identity):
+    __tablename__ = "role"
+
+    def __init__(self, resp: GetRoleResponseTypeDef):
+        super().__init__(resp["Role"])
+
+    RoleName: str = Column(String)
+    RoleId: str = Column(String)
+    AssumeRolePolicyDocument: dict = Column(JSONType)
+    MaxSessionDuration: int = Column(Integer)
+    RoleLastUsed: dict = Column(JSONType)
+
+    id = Column(Integer, ForeignKey('identity.id'), primary_key=True)
+    __mapper_args__ = {
+        'polymorphic_identity': 'role'
+    }
+
+class InstanceProfile(Identity):
+    __tablename__ = "instance_profile"
+
+    def __init__(self, resp: GetInstanceProfileResponseTypeDef):
+        super().__init__(resp['InstanceProfile'])
+
+    InstanceProfileName: str = Column(String)
+    InstanceProfileId: str = Column(String)
+    AssumeRolePolicyDocument: dict = Column(JSONType)
+
+    #TODO Should reference a role
+    Roles: List[dict] = Column(JSONType)
+
+    id = Column(Integer, ForeignKey('identity.id'), primary_key=True)
+    __mapper_args__ = {
+        'polymorphic_identity': 'instance_profile'
+    }
+
+
