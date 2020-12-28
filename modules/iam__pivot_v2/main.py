@@ -3,11 +3,13 @@ import argparse
 import collections
 import json
 import os
+import sys
 
 import boto3
 
 import principalmapper.common
 from modules.iam__pivot_v2.escalation import StsEscalationChecker
+from modules.iam__pivot_v2.graph import create_graph
 from principalmapper.graphing import graph_actions
 from principalmapper.querying.query_utils import get_search_list
 from principalmapper.graphing import gathering
@@ -38,7 +40,10 @@ def main(args, pacu_main):
     input = pacu_main.input
     aws_sess = pacu_main.get_boto3_session()
 
-    if pacu_main.fetch_data(['IAM'], 'iam__enum_permissions', '') is False:
+    iam_data = pacu_main.fetch_data(['IAM'], 'iam__enum_users_roles_policies_groups', '--users --roles --policies '
+                                                                                      '--groups '
+                                                                                      '--instance-profiles')
+    if iam_data is False:
         print('Pre-req module not run successfully. Continuing anyways')
 
     principalmapper.graphing.gathering.edge_identification.checker_map = checker_map
@@ -46,7 +51,7 @@ def main(args, pacu_main):
     graph_path = os.path.abspath("./sessions/{}/pmapper".format(session.name))
     os.makedirs(graph_path, 0o0700, True)
     if args.rebuild_db or not os.path.exists(graph_path):
-        graph = graph_actions.create_new_graph(session=aws_sess._session, service_list=['sts'], debug=False)
+        graph = create_graph(session, aws_session=aws_sess._session, service_list=['sts'], output=sys.stdout, debug=False)
         graph.store_graph_as_json(graph_path)
     else:
         graph = graph_actions.get_graph_from_disk(graph_path)
