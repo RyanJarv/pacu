@@ -1,5 +1,6 @@
 import os
 
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Meaningful values: 'minimal', 'low', 'high', 'extreme'
 # 'Minimal' will only add tracebacks to error log files.

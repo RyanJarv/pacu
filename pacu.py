@@ -3,6 +3,7 @@ import copy
 import importlib
 import json
 import os
+import pathlib
 import random
 import re
 import shlex
@@ -12,7 +13,12 @@ import sys
 import time
 import traceback
 import argparse
-from typing import List, Optional, Any, Dict, Union, Tuple
+from types import ModuleType
+
+import typer
+from typing import Iterator, List, Optional, Any, Dict, Union, Tuple
+
+from typer import Typer
 
 try:
     import requests
@@ -129,6 +135,35 @@ def display_pacu_help():
                                               the AWS web console
     """)
 
+typer_app = typer.Typer()
+
+
+def get_typer_modules() -> Iterator[Tuple[str, ModuleType]]:
+    for path in pathlib.Path(settings.ROOT_DIR).glob(os.path.join('modules', '*', 'typer.py')):
+        rel = path.relative_to(settings.ROOT_DIR)
+        name = rel.parts[-2]
+        mod_name = '.'.join(rel.parts)
+        yield name, importlib.import_module(mod_name.removesuffix('.py'))
+
+for name, mod in get_typer_modules():
+    """ Check if app object exists and fallback to looking for the main function
+
+    The app method allows more customizations as well as multiple commands while the
+     second, importing the main function is very simple. Below is an example of the
+     later. See the typer docs for more details.
+
+         import typer
+
+         def main(name: str = 'test'):
+             typer.echo(f"Hello {name}")
+    """
+
+    try:
+        typer_app.add_typer(mod.app, name=name)
+    except AttributeError:
+        t = Typer()
+        t.command()(mod.main)
+        typer_app.add_typer(t, name=name)
 
 def import_module_by_name(module_name: str, include: List[str] = []) -> Any:  # TODO: define module type
     file_path = os.path.join(os.getcwd(), 'modules', module_name, 'main.py')
@@ -138,7 +173,6 @@ def import_module_by_name(module_name: str, include: List[str] = []) -> Any:  # 
         importlib.reload(module)
         return module
     return None
-
 
 def get_data_from_traceback(tb) -> Tuple[Optional[PacuSession], List[str], List[str]]:
     session = None
@@ -1707,7 +1741,30 @@ aws_secret_access_key = {}
         parser.add_argument('--exec', action='store_true', help='exec module')
         parser.add_argument('--set-regions', nargs='+', default=None, help='<region1 region2 ...> or <all> for all', metavar='')
         parser.add_argument('--whoami', action='store_true', help='Display information on current IAM user')
+        parser.add_argument('typer_mod', nargs='+')
         args = parser.parse_args()
+
+        if args.typer_mod:
+            for name, mod in get_typer_modules():
+                """ Check if app object exists and fallback to looking for the main function
+
+                The app method allows more customizations as well as multiple commands while the
+                 second, importing the main function is very simple. Below is an example of the
+                 later. See the typer docs for more details.
+
+                     import typer
+
+                     def main(name: str = 'test'):
+                         typer.echo(f"Hello {name}")
+                """
+
+                try:
+                    typer_app.add_typer(mod.app, name=name)
+                except AttributeError:
+                    t = Typer()
+                    t.command()(mod.main)
+                    typer_app.add_typer(t, name=name)
+            typer_app()
 
         if any([args.session, args.data, args.module_args, args.exec, args.set_regions, args.whoami]):
             if args.session is None:
